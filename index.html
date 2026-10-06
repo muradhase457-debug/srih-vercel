@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2563eb">
+<title>SRIH - My Attendance</title>
+<style>
+  :root{--bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706;--blue:#2563eb;--purple:#7c3aed;}
+  @media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#131c2e;--text:#e5e7eb;--muted:#94a3b8;--line:#243049;}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding:16px;padding-top:max(16px,env(safe-area-inset-top));}
+  .wrap{max-width:560px;margin:0 auto}
+  header{text-align:center;margin:8px 0 18px}
+  header h1{margin:0;font-size:28px;letter-spacing:2px;color:var(--brand)}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  .card{background:var(--card);border-radius:18px;padding:16px;box-shadow:0 4px 18px rgba(0,0,0,.07);margin-bottom:14px}
+  label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px}
+  .row{display:flex;gap:10px}.row>div{flex:1}
+  button{width:100%;margin-top:14px;padding:13px;border:0;border-radius:12px;background:var(--brand);color:#fff;font-weight:800;font-size:15px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .note{font-size:11px;color:var(--muted);margin-top:10px;text-align:center}
+  .err{background:#fee2e2;color:#991b1b;padding:10px 12px;border-radius:12px;font-size:13px;margin-top:12px;display:none}
+  .name{font-size:18px;font-weight:800}.sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .stat{border-radius:14px;padding:10px 6px;text-align:center;font-size:11px;font-weight:700}
+  .stat b{display:block;font-size:22px;margin-top:2px}
+  .g{background:rgba(22,163,74,.12);color:var(--green)}.r{background:rgba(220,38,38,.12);color:var(--red)}
+  .a{background:rgba(217,119,6,.12);color:var(--amber)}.b{background:rgba(37,99,235,.12);color:var(--blue)}
+  .p{background:rgba(124,58,237,.12);color:var(--purple)}.s{background:rgba(100,116,139,.15);color:var(--muted)}
+  .tw{max-height:55vh;overflow:auto;margin-top:12px;border-radius:12px;border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{position:sticky;top:0;background:var(--card);text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--line)}
+  td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  tr.present td.st{color:var(--green)}tr.absent{background:rgba(220,38,38,.08)}tr.absent td.st{color:var(--red)}
+  tr.off{background:rgba(37,99,235,.08)}tr.off td.st{color:var(--blue)}tr.other td.st{color:var(--amber)}
+  td.st{font-weight:800}
+  #result{display:none}
+  .back{background:var(--bg);color:var(--text);border:1px solid var(--line);margin-top:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SRIH</h1>
+    <p>PRAN-RFL HRIS Attendance Viewer</p>
+  </header>
+
+  <div class="card" id="loginCard">
+    <label>HRIS User ID</label>
+    <input id="uid" placeholder="e.g. S227230" autocomplete="username" autocapitalize="characters">
+    <label>HRIS Password</label>
+    <input id="pwd" type="password" placeholder="Password" autocomplete="current-password">
+    <div class="row">
+      <div><label>Month</label><select id="month"></select></div>
+      <div><label>Year</label><input id="year" type="number"></div>
+    </div>
+    <button id="go">Show Attendance</button>
+    <div class="err" id="err"></div>
+    <p class="note">🔒 ID/Password kothao save hoy na. Shudhu HRIS login-er jonno ekbar pathano hoy.</p>
+  </div>
+
+  <div id="result">
+    <div class="card">
+      <div class="name" id="rName"></div>
+      <div class="sub" id="rSub"></div>
+      <div class="grid" id="rGrid"></div>
+      <div class="tw"><table><thead><tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody id="rBody"></tbody></table></div>
+    </div>
+    <button class="back" id="back">← Onno month dekho</button>
+  </div>
+</div>
+
+<script>
+  // ⚠️ Cloudflare Worker deploy korar por tomar URL ekhane boshao (shesh-e /attendance thakbe)
+  const HRIS_API = "/api/attendance";
+
+  const $ = id => document.getElementById(id);
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const now = new Date();
+  $("month").innerHTML = MONTHS.map((m,i)=>`<option value="${i+1}" ${i===now.getMonth()?"selected":""}>${m}</option>`).join("");
+  $("year").value = now.getFullYear();
+
+  // shudhu User ID mone rakhbe (password na)
+  try { $("uid").value = localStorage.getItem("srih_uid") || ""; } catch(e){}
+
+  function showErr(msg){ const e=$("err"); e.textContent=msg; e.style.display=msg?"block":"none"; }
+  const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+  $("go").onclick = async () => {
+    const id=$("uid").value.trim(), pass=$("pwd").value;
+    if(!id||!pass) return showErr("ID ar Password dao");
+    showErr(""); $("go").disabled=true; $("go").textContent="Loading...";
+    try{
+      const res = await fetch(HRIS_API,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id,pass,month:$("month").value,year:$("year").value})});
+      const data = await res.json();
+      if(!res.ok||data.error) throw new Error(data.error||"Server error");
+      try{ localStorage.setItem("srih_uid",id);}catch(e){}
+      render(data);
+      $("pwd").value="";
+    }catch(e){ showErr(e.message==="Failed to fetch" ? "Server-e connect hocche na. Internet ba Worker URL check koro." : e.message); }
+    $("go").disabled=false; $("go").textContent="Show Attendance";
+  };
+
+  $("back").onclick = () => { $("result").style.display="none"; $("loginCard").style.display="block"; };
+
+  function render(d){
+    const s=d.summary||{}, rows=d.rows||[];
+    $("rName").textContent = s.name||"My Attendance";
+    $("rSub").textContent = `Staff ID: ${s.staffId||"-"} • Total Days: ${s.totalDays||"-"} • Payable: ${s.payableDays||"-"}` + (s.lateMinutes?` • Late Min: ${s.lateMinutes}`:"");
+    const st=(l,v,c)=>`<div class="stat ${c}">${l}<b>${v||0}</b></div>`;
+    $("rGrid").innerHTML = st("Present",s.present,"g")+st("Absent",s.absent,"r")+st("Late",s.late,"a")
+      + st("Leave (Pay)",s.leaveWithPay,"b")+st("Leave (No Pay)",s.leaveWithoutPay,"p")+st("Holiday",s.holiday,"s");
+    $("rBody").innerHTML = rows.map(r=>{
+      const x=String(r.status||"").toLowerCase();
+      const cls = x.startsWith("present")?"present":x.startsWith("absent")?"absent":(x.includes("off")||x.includes("holiday"))?"off":"other";
+      return `<tr class="${cls}"><td>${esc(r.date)}</td><td>${esc((r.day||"").slice(0,3))}</td><td>${esc(r.inTime||"-")}</td><td>${esc(r.outTime||"-")}</td><td class="st">${esc(r.status)}</td></tr>`;
+    }).join("");
+    $("loginCard").style.display="none"; $("result").style.display="block";
+    window.scrollTo(0,0);
+  }
+</script>
+</body>
+</html>
