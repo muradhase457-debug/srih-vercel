@@ -62,6 +62,13 @@
   .bar2 i{display:block;height:100%}
   .leg{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
   .leg b{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+  .hcard{padding:12px 0;border-bottom:1px solid var(--line)}.hcard:last-child{border-bottom:0}
+  .htop{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px;font-weight:800}
+  .chip{font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;white-space:nowrap}
+  .c-g{background:rgba(22,163,74,.15);color:var(--green)}.c-a{background:rgba(217,119,6,.15);color:var(--amber)}.c-r{background:rgba(220,38,38,.15);color:var(--red)}
+  .hmeta{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .hrs{font-size:13px;margin-top:4px}
+  .ext{display:block;text-align:center;text-decoration:none;margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:12px;color:var(--brand);font-weight:700;font-size:13px}
   .loading{text-align:center;color:var(--muted);padding:30px 0;font-size:14px}
 </style>
 </head>
@@ -88,6 +95,7 @@
       <button class="tab" data-t="payslip">💰 Salary</button>
       <button class="tab" data-t="purchase">🍽️ Canteen</button>
       <button class="tab" data-t="trend">📈 Trend</button>
+      <button class="tab" data-t="iom">🕘 IOM</button>
     </div>
     <div class="card" id="barCard">
       <div class="bar">
@@ -158,7 +166,7 @@
   async function switchTab(t, force) {
     tab = t;
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-    $("barCard").style.display = (t === "balance" || t === "trend") ? "none" : "block";
+    $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom") ? "none" : "block";
     showErr($("err"), "");
     const ck = t + "|" + key();
     if (cache[ck]) return render(t, cache[ck]);
@@ -180,6 +188,7 @@
     if (t === "payslip") return renderPayslip(d);
     if (t === "purchase") return renderPurchase(d);
     if (t === "trend") return renderTrend(d);
+    if (t === "iom") return renderIom(d);
   }
 
   function renderAttendance(d) {
@@ -192,10 +201,28 @@
     $("out").innerHTML = `<div class="card">
       <div class="name">${esc(s.name||"My Attendance")}</div>
       <div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div>
-      <div class="grid">${stat("Present",s.present,"g")+stat("Absent",s.absent,"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
+      <div class="grid">${stat("Present",s.present,"g")+stat("Absent",Math.max(0,(+s.absent||0)-(+d.futureAbsent||0)),"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
+      ${(+d.futureAbsent>0)?`<div class="sub" style="margin-top:8px">ℹ️ HRIS-e Absent ${esc(s.absent)}, tar moddhe ${esc(d.futureAbsent)} din ekhono ashe ni (ajker por-er din), tai upore baad dewa hoyeche.</div>`:""}
       ${(+s.late>0)?`<div class="warn">⏰ Ei mash-e ${esc(s.late)} bar late${s.lateMinutes?" (mot "+esc(s.lateMinutes)+" minute)":""}</div>`:""}
       <div class="tw"><table><thead><tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
+
+  function chipCls(st) { st = String(st||"").toLowerCase(); return /approv/.test(st) ? "c-g" : /reject|cancel|den|declin/.test(st) ? "c-r" : "c-a"; }
+  function histCards(hh) {
+    const H = (hh && hh.headers) || [], R = (hh && hh.rows) || [];
+    if (!R.length) return '<p class="sub" style="margin-top:10px">Kono history pai ni.</p>';
+    const idx = re => H.findIndex(x => re.test(x));
+    const iF = idx(/from/i), iT = idx(/^to/i), iS = idx(/status/i), iR = idx(/reason/i);
+    return R.map(r => {
+      const from = r[iF >= 0 ? iF : 0], to = r[iT >= 0 ? iT : 1];
+      const st = iS >= 0 ? r[iS] : "";
+      const skip = new Set([iF >= 0 ? iF : 0, iT >= 0 ? iT : 1, iS, iR]);
+      const meta = r.map((v, i) => skip.has(i) || !v ? null : (H[i] ? H[i] + ": " : "") + v).filter(Boolean).join(" • ");
+      return `<div class="hcard"><div class="htop"><span>${esc(from)}${to && to !== from ? " → " + esc(to) : ""}</span>${st ? `<span class="chip ${chipCls(st)}">${esc(st)}</span>` : ""}</div>${iR >= 0 && r[iR] ? `<div class="hrs">${esc(r[iR])}</div>` : ""}<div class="hmeta">${esc(meta)}</div></div>`;
+    }).join("");
+  }
+  const HRIS_LEAVE = "http://hris.prangroup.com:8686/Pages/Portal/QLvApplication.aspx";
+  const HRIS_IOM = "http://hris.prangroup.com:8686/Pages/Portal/QPersonalIOM.aspx";
 
   function renderBalance(d) {
     $("out").innerHTML = `<div class="card">
@@ -204,7 +231,13 @@
       <div class="kv"><span>Entitled</span><span>${esc(d.entitled||"-")}</span></div>
       <div class="kv"><span>First Approver</span><span>${esc(d.firstApprover||"-")}</span></div>
       <div class="kv"><span>Final Approver</span><span>${esc(d.finalApprover||"-")}</span></div>
-      <p class="note">Leave apply korte HRIS site-e jao. SRIH shudhu balance dekhay.</p></div>`;
+      <a class="ext" href="${HRIS_LEAVE}" target="_blank" rel="noopener">HRIS-e Leave apply koro ↗</a></div>
+      <div class="card"><div class="name">Leave history</div>${histCards(d.history)}</div>`;
+  }
+
+  function renderIom(d) {
+    $("out").innerHTML = `<div class="card"><div class="name">IOM history</div>${histCards(d)}
+      <a class="ext" href="${HRIS_IOM}" target="_blank" rel="noopener">HRIS-e IOM apply koro ↗</a></div>`;
   }
 
   function renderPayslip(d) {
@@ -221,11 +254,12 @@
   function renderTrend(d) {
     const ms = d.months || [];
     const rows = ms.map(m => {
-      const tot = (m.present + m.absent + m.leave + m.holiday) || 1;
+      const ab = Math.max(0, m.absent - (m.future || 0));
+      const tot = (m.present + ab + m.leave + m.holiday) || 1;
       const w = n => (n * 100 / tot).toFixed(1) + "%";
       return `<div class="mrow"><div class="mhead">${esc(m.label)}<span>${m.ok ? "Late: " + m.late + (m.lateMinutes ? " (" + m.lateMinutes + " min)" : "") : "data nai"}</span></div>
-        <div class="bar2"><i style="width:${w(m.present)};background:var(--green)"></i><i style="width:${w(m.leave)};background:var(--blue)"></i><i style="width:${w(m.holiday)};background:#94a3b8"></i><i style="width:${w(m.absent)};background:var(--red)"></i></div>
-        <div class="leg"><span><b style="background:var(--green)"></b>Present ${m.present}</span><span><b style="background:var(--red)"></b>Absent ${m.absent}</span><span><b style="background:var(--blue)"></b>Leave ${m.leave}</span><span><b style="background:#94a3b8"></b>Holiday ${m.holiday}</span></div></div>`;
+        <div class="bar2"><i style="width:${w(m.present)};background:var(--green)"></i><i style="width:${w(m.leave)};background:var(--blue)"></i><i style="width:${w(m.holiday)};background:#94a3b8"></i><i style="width:${w(ab)};background:var(--red)"></i></div>
+        <div class="leg"><span><b style="background:var(--green)"></b>Present ${m.present}</span><span><b style="background:var(--red)"></b>Absent ${ab}</span><span><b style="background:var(--blue)"></b>Leave ${m.leave}</span><span><b style="background:#94a3b8"></b>Holiday ${m.holiday}</span></div></div>`;
     }).join("");
     $("out").innerHTML = `<div class="card"><div class="name">Last 4 mash</div><div class="sub">Present, Absent, Leave ar Holiday-r tulona</div>${rows}</div>`;
   }
