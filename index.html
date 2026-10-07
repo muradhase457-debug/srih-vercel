@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SRIH">
 <title>SRIH - HRIS Viewer</title>
 <style>
   :root{--bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;--line:#e2e8f0;--brand:#2563eb;--green:#16a34a;--red:#dc2626;--amber:#d97706;--blue:#2563eb;--purple:#7c3aed;}
@@ -48,6 +54,14 @@
   .kv{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;gap:12px}
   .kv span:first-child{color:var(--muted)}.kv span:last-child{text-align:right;font-weight:700;word-break:break-word}
   h4{margin:14px 0 4px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .warn{background:rgba(217,119,6,.12);color:var(--amber);padding:10px 12px;border-radius:12px;font-size:13px;font-weight:600;margin-top:12px}
+  .mrow{padding:12px 0;border-bottom:1px solid var(--line)}.mrow:last-child{border-bottom:0}
+  .mhead{display:flex;justify-content:space-between;font-size:14px;font-weight:800;margin-bottom:6px}
+  .mhead span{font-size:12px;color:var(--muted);font-weight:600}
+  .bar2{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line)}
+  .bar2 i{display:block;height:100%}
+  .leg{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
+  .leg b{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
   .loading{text-align:center;color:var(--muted);padding:30px 0;font-size:14px}
 </style>
 </head>
@@ -73,6 +87,7 @@
       <button class="tab" data-t="balance">🏖️ Leave</button>
       <button class="tab" data-t="payslip">💰 Salary</button>
       <button class="tab" data-t="purchase">🍽️ Canteen</button>
+      <button class="tab" data-t="trend">📈 Trend</button>
     </div>
     <div class="card" id="barCard">
       <div class="bar">
@@ -143,7 +158,7 @@
   async function switchTab(t, force) {
     tab = t;
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-    $("barCard").style.display = t === "balance" ? "none" : "block";
+    $("barCard").style.display = (t === "balance" || t === "trend") ? "none" : "block";
     showErr($("err"), "");
     const ck = t + "|" + key();
     if (cache[ck]) return render(t, cache[ck]);
@@ -164,6 +179,7 @@
     if (t === "balance") return renderBalance(d);
     if (t === "payslip") return renderPayslip(d);
     if (t === "purchase") return renderPurchase(d);
+    if (t === "trend") return renderTrend(d);
   }
 
   function renderAttendance(d) {
@@ -177,6 +193,7 @@
       <div class="name">${esc(s.name||"My Attendance")}</div>
       <div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div>
       <div class="grid">${stat("Present",s.present,"g")+stat("Absent",s.absent,"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
+      ${(+s.late>0)?`<div class="warn">⏰ Ei mash-e ${esc(s.late)} bar late${s.lateMinutes?" (mot "+esc(s.lateMinutes)+" minute)":""}</div>`:""}
       <div class="tw"><table><thead><tr><th>Date</th><th>Day</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
   }
 
@@ -198,6 +215,19 @@
       <div class="grid" style="grid-template-columns:repeat(3,1fr)">${stat("Allowance",d.totalAllowance,"g")+stat("Deduction",d.totalDeduction,"r")+stat("Net",d.net,"b")}</div>
       <h4>Allowance</h4>${rows(d.allowance||[])}
       <h4>Deduction</h4>${rows(d.deduction||[])}</div>`;
+  }
+
+
+  function renderTrend(d) {
+    const ms = d.months || [];
+    const rows = ms.map(m => {
+      const tot = (m.present + m.absent + m.leave + m.holiday) || 1;
+      const w = n => (n * 100 / tot).toFixed(1) + "%";
+      return `<div class="mrow"><div class="mhead">${esc(m.label)}<span>${m.ok ? "Late: " + m.late + (m.lateMinutes ? " (" + m.lateMinutes + " min)" : "") : "data nai"}</span></div>
+        <div class="bar2"><i style="width:${w(m.present)};background:var(--green)"></i><i style="width:${w(m.leave)};background:var(--blue)"></i><i style="width:${w(m.holiday)};background:#94a3b8"></i><i style="width:${w(m.absent)};background:var(--red)"></i></div>
+        <div class="leg"><span><b style="background:var(--green)"></b>Present ${m.present}</span><span><b style="background:var(--red)"></b>Absent ${m.absent}</span><span><b style="background:var(--blue)"></b>Leave ${m.leave}</span><span><b style="background:#94a3b8"></b>Holiday ${m.holiday}</span></div></div>`;
+    }).join("");
+    $("out").innerHTML = `<div class="card"><div class="name">Last 4 mash</div><div class="sub">Present, Absent, Leave ar Holiday-r tulona</div>${rows}</div>`;
   }
 
   function renderPurchase(d) {
