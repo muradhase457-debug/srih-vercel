@@ -199,7 +199,7 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const { id, pass, page, month, year, subhead } = req.body || {};
   if (!id || !pass) return res.status(400).json({ error: "ID/Password dao" });
-  if (!["attendance", "payslip", "purchase", "balance"].includes(page)) return res.status(400).json({ error: "Unknown page" });
+  if (!["attendance", "payslip", "purchase", "balance", "trend"].includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
     const jar = await login(id, pass);
@@ -232,6 +232,27 @@ module.exports = async (req, res) => {
       }
       result.subheads = subheads;
       return res.status(200).json(result);
+    }
+
+    if (page === "trend") {
+      // last 4 mash-er attendance summary (ekbar login, ek ek kore mash)
+      const out = [];
+      const base = new Date(Number(yr), Number(mo) - 1, 1);
+      for (let i = 0; i < 4; i++) {
+        const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+        const m = d.getMonth() + 1, y = d.getFullYear();
+        try {
+          const { html } = await showMonth(PAGES.attendance, jar, y, m);
+          const a = parseAttendance(html);
+          const s = a.summary;
+          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: a.rows.length > 0,
+            present: +s.present || 0, absent: +s.absent || 0, late: +s.late || 0, lateMinutes: +s.lateMinutes || 0,
+            holiday: +s.holiday || 0, leave: (+s.leaveWithPay || 0) + (+s.leaveWithoutPay || 0) });
+        } catch (e) {
+          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: false, present: 0, absent: 0, late: 0, lateMinutes: 0, holiday: 0, leave: 0 });
+        }
+      }
+      return res.status(200).json({ months: out });
     }
 
     if (page === "balance") {
