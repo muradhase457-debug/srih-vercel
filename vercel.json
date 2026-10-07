@@ -1,5 +1,5 @@
 {
   "functions": {
-    "api/hris.js": { "maxDuration": 30 }
+    "api/hris.js": { "maxDuration": 60 }
   }
 }
