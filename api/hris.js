@@ -8,6 +8,7 @@ const PAGES = {
   payslip: BASE + "/Pages/Portal/Payslip.aspx",
   purchase: BASE + "/Pages/Payroll/PurchaseDetails.aspx",
   balance: BASE + "/Pages/Portal/QLvApplication.aspx",
+  iom: BASE + "/Pages/Portal/QPersonalIOM.aspx",
 };
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -194,12 +195,51 @@ function parseBalance(html) {
   };
 }
 
+
+// ---------- SAFETY: shudhu dekhar button-e postback ----------
+// Save / Delete / Edit / Apply kono button ei site kokhono chape na.
+const SAFE_TARGETS = new Set(["ctl00$cphMain$btnShow", "ctl00$cphMain$btnView"]);
+async function readOnlyPostback(url, jar, html, target) {
+  if (!SAFE_TARGETS.has(target)) throw new UserError("Blocked: shudhu dekhar button allowed", 403);
+  const f = formFields(html);
+  f["__EVENTTARGET"] = target;
+  f["__EVENTARGUMENT"] = "";
+  const r = await post(url, jar, f);
+  return await r.text();
+}
+
+// Leave / IOM history table (header + date diye shuru hoya row)
+function parseHistory(html) {
+  let headers = [];
+  const rows = [];
+  for (const tr of html.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
+    const th = [...tr.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map(m => text(m[1]));
+    if (th.length >= 4 && th.some(x => /date/i.test(x))) { headers = th; continue; }
+    const c = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m => text(m[1]));
+    if (c.length >= 4 && /^\d{2}\/\d{2}\/\d{4}$/.test(c[0])) rows.push(c);
+  }
+  // Action column (edit/delete) bad dao
+  const ai = headers.findIndex(h => /^action$/i.test(h));
+  if (ai >= 0) { headers = headers.filter((_, i) => i !== ai); for (let i = 0; i < rows.length; i++) rows[i] = rows[i].filter((_, j) => j !== ai); }
+  return { headers, rows: rows.slice(0, 60) };
+}
+
+// Bangladesh-er ajker tarikh-er por-er din-gulo (HRIS ekhono-ashe-ni din-ke Absent dhore)
+function dhakaToday() { const d = new Date(Date.now() + 6 * 3600 * 1000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
+function countFutureAbsent(rows) {
+  const t = dhakaToday();
+  return rows.filter(r => {
+    const m = r.date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return m && Date.UTC(+m[3], +m[2] - 1, +m[1]) > t && /^absent/i.test(r.status);
+  }).length;
+}
+
 // ---------- handler ----------
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const { id, pass, page, month, year, subhead } = req.body || {};
   if (!id || !pass) return res.status(400).json({ error: "ID/Password dao" });
-  if (!["attendance", "payslip", "purchase", "balance", "trend"].includes(page)) return res.status(400).json({ error: "Unknown page" });
+  if (!["attendance", "payslip", "purchase", "balance", "trend", "iom"].includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
     const jar = await login(id, pass);
@@ -209,6 +249,7 @@ module.exports = async (req, res) => {
       const { html } = await showMonth(PAGES.attendance, jar, yr, mo);
       const d = parseAttendance(html);
       if (!d.rows.length) throw new UserError("Attendance data pailam na", 502);
+      d.futureAbsent = countFutureAbsent(d.rows);
       return res.status(200).json(d);
     }
 
@@ -247,9 +288,9 @@ module.exports = async (req, res) => {
           const s = a.summary;
           out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: a.rows.length > 0,
             present: +s.present || 0, absent: +s.absent || 0, late: +s.late || 0, lateMinutes: +s.lateMinutes || 0,
-            holiday: +s.holiday || 0, leave: (+s.leaveWithPay || 0) + (+s.leaveWithoutPay || 0) });
+            holiday: +s.holiday || 0, leave: (+s.leaveWithPay || 0) + (+s.leaveWithoutPay || 0), future: countFutureAbsent(a.rows) });
         } catch (e) {
-          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: false, present: 0, absent: 0, late: 0, lateMinutes: 0, holiday: 0, leave: 0 });
+          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: false, present: 0, absent: 0, late: 0, lateMinutes: 0, holiday: 0, leave: 0, future: 0 });
         }
       }
       return res.status(200).json({ months: out });
@@ -259,12 +300,19 @@ module.exports = async (req, res) => {
       const r = await get(PAGES.balance, jar);
       if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
       const h = await r.text();
-      const f = formFields(h);
-      f["__EVENTTARGET"] = "ctl00$cphMain$btnView"; // "View Balance & Approver" (shudhu dekhar button)
-      f["__EVENTARGUMENT"] = "";
-      const r2 = await post(PAGES.balance, jar, f);
-      const d = parseBalance(await r2.text());
+      const d = parseBalance(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnView"));
+      try {
+        d.history = parseHistory(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnShow"));
+      } catch (e) { d.history = { headers: [], rows: [] }; }
       return res.status(200).json(d);
+    }
+
+    if (page === "iom") {
+      const r = await get(PAGES.iom, jar);
+      if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+      const h = await r.text();
+      const hist = parseHistory(await readOnlyPostback(PAGES.iom, jar, h, "ctl00$cphMain$btnShow"));
+      return res.status(200).json(hist);
     }
   } catch (e) {
     const code = e instanceof UserError ? e.code : 502;
