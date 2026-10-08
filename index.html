@@ -159,6 +159,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       <button class="tab" data-t="payslip" data-c="#e2d9fb">💰 Salary</button>
       <button class="tab" data-t="purchase" data-c="#ffd9c2">🍽️ Canteen</button>
       <button class="tab" data-t="trend" data-c="#cfe6fb">📈 Trend</button>
+      <button class="tab" data-t="limit" data-c="#fde7b0">🛒 Limit</button>
       <button class="tab" data-t="iom" data-c="#fbd0dc">🕘 IOM</button>
     </div><div class="drop" id="drop" aria-hidden="true"></div></div>
     <div class="card" id="barCard">
@@ -245,7 +246,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     tab = t;
     if (prevTab !== t || force === "first") popBubble(t);
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-    $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom") ? "none" : "block";
+    $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom" || t === "limit") ? "none" : "block";
     showErr($("err"), "");
     const ck = t + "|" + key();
     if (cache[ck]) return render(t, cache[ck]);
@@ -268,11 +269,14 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     if (t === "purchase") return renderPurchase(d);
     if (t === "trend") return renderTrend(d);
     if (t === "iom") return renderIom(d);
+    if (t === "limit") return renderLimit(d);
   }
 
   function mins(t){const m=/(\d{1,2}):(\d{2})\s*([AP]M)?/i.exec(t||"");if(!m)return null;let h=+m[1];if(m[3])h=h%12+(/p/i.test(m[3])?12:0);return h*60+ +m[2]}
   function stC(x){x=String(x||"").toLowerCase();return /absent/.test(x)?"--red":/late/.test(x)?"--amber":/^present/.test(x)?"--green":/leave/.test(x)?"--blue":/off|holiday/.test(x)?"--teal":/today/.test(x)?"--gold":"--muted"}
   function countUp(sel){document.querySelectorAll(sel).forEach(b=>{const t=+b.textContent;if(isNaN(t)||!t)return;const s=performance.now();(function f(n){const p=Math.min(1,(n-s)/900);b.textContent=Math.round(t*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(f)})(s)})}
+  // Real HRIS employee photo (falls back to the hero picture if it can't load)
+  const photoUrl = id => { id = encodeURIComponent(String(id||"").trim().toUpperCase()); return "https://hris.prangroup.com:777/CONTENT/Employee/Emp/" + id + "/" + id + ".jpg"; };
   function renderAttendance(d) {
     const s=d.summary||{},rows=d.rows||[],P=+s.present||0,L=Math.min(P,+s.late||0),ab=Math.max(0,(+s.absent||0)-(+d.futureAbsent||0)),lv=(+s.leaveWithPay||0)+(+s.leaveWithoutPay||0),H=+s.holiday||0;
     const seg=[[P-L,"--green","On-time"],[L,"--amber","Late"],[lv,"--blue","Leave"],[ab,"--red","Absent"],[H,"--teal","Holiday"]].filter(x=>x[0]>0),tot=seg.reduce((a,x)=>a+x[0],0)||1,C=2*Math.PI*54,g=seg.length>1?9:0;
@@ -280,7 +284,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     const td=String(now.getDate()).padStart(2,"0")+"/"+String(now.getMonth()+1).padStart(2,"0")+"/"+now.getFullYear();
     const tl=rows.map((r,i)=>{const p=String(r.date||"").split("/"),a=mins(r.inTime),b=mins(r.outTime),w=a!=null&&b!=null&&b>a?b-a:0,c=stC(r.status),isT=r.date===td;
       return `<div class="row${isT?" today":""}" style="--c:var(${isT?"--gold":c});--d:${Math.min(i*.04,1.2)}s"><div class="dt"><b>${esc(p[0]||"")}</b><span>${esc((MONTHS[(+p[1]||1)-1]||"").slice(0,3).toUpperCase())} · ${esc(String(r.day||"").slice(0,3).toUpperCase())}</span></div><div class="mid">${a!=null?esc(r.inTime)+" → "+esc(r.outTime||"–")+(w?`<small>${Math.floor(w/60)}h ${w%60}m kaj</small><div class="hb"><u data-w="${Math.min(100,w/7.2).toFixed(0)}"></u></div>`:""):"—<small>"+esc(r.status||"")+"</small>"}</div><span class="pill" style="background:var(${c})">${esc(r.status)}</span></div>`}).join("");
-    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
+    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av" style="background:url(${photoUrl(s.staffId||(cred&&cred.id))}) center/cover no-repeat,var(--hero) -94px -75px/244px no-repeat"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
       <div class="card rise" style="--d:.1s"><div class="sum"><div class="rg"><svg viewBox="0 0 140 140"><circle cx="70" cy="70" r="54" fill="none" stroke="rgba(127,150,160,.25)" stroke-width="14"/>${arcs}</svg><div class="rc"><b>${P}</b><span>days present</span></div></div><div class="lg">${seg.map(x=>`<div><i style="background:var(${x[1]})"></i>${x[2]} · ${x[0]}</div>`).join("")}</div></div>
       <div class="grid">${stat("Present",s.present,"g")+stat("Absent",ab,"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
       ${(+d.futureAbsent>0)?`<div class="sub" style="margin-top:10px">ℹ️ HRIS shows ${esc(s.absent)} absent, but ${esc(d.futureAbsent)} of those days have not happened yet (days after today), so they are excluded above.</div>`:""}
@@ -305,6 +309,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     }).join("");
   }
   const HRIS_LEAVE = "http://hris.prangroup.com:8686/Pages/Portal/QLvApplication.aspx";
+  const HRIS_ORDER = "http://hris.prangroup.com:8686/Pages/ProductPurchase/ProductOrder.aspx";
   const HRIS_IOM = "http://hris.prangroup.com:8686/Pages/Portal/QPersonalIOM.aspx";
 
   function renderBalance(d) {
@@ -318,19 +323,39 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       <div class="card"><div class="name">Leave history</div>${histCards(d.history)}</div>`;
   }
 
+  function renderLimit(d) {
+    const stores = (d.stores || []).map(x => `<span style="display:inline-block;margin:4px 6px 0 0;padding:6px 11px;border-radius:99px;font-size:11.5px;font-weight:800;border:1.5px solid var(--line);background:var(--in)">${esc(x.name)}</span>`).join("");
+    $("out").innerHTML = `<div class="card rise">
+      <div class="name">🛒 Product Order Limit</div>
+      <div class="sub">${esc(d.name||"")}${d.staffId?" • "+esc(d.staffId):""}</div>
+      <div class="big" style="color:var(--gold)">৳ ${esc(d.limit)}</div>
+      <div class="sub">Total Limit (HRIS Extras → Product Order)</div>
+      ${d.total ? `<div class="kv" style="margin-top:12px"><span>Current order total</span><span>${esc(d.total)}</span></div>` : ""}
+      ${stores ? `<h4>Stores</h4>${stores}` : ""}
+      <a class="ext" href="${HRIS_ORDER}" target="_blank" rel="noopener">Open Product Order on HRIS ↗</a></div>`;
+  }
+
   function renderIom(d) {
     $("out").innerHTML = `<div class="card"><div class="name">IOM history</div>${histCards(d)}
       <a class="ext" href="${HRIS_IOM}" target="_blank" rel="noopener">Apply for IOM on HRIS ↗</a></div>`;
   }
 
   function renderPayslip(d) {
+    const num = x => parseFloat(String(x == null ? "" : x).replace(/,/g, "")) || 0;
+    const fmt = n => n.toLocaleString("en-US", {maximumFractionDigits: 2});
+    const A = d.allowance || [], D = d.deduction || [];
+    const sumA = A.reduce((t, r) => t + num(r.amount), 0), sumD = D.reduce((t, r) => t + num(r.amount), 0);
+    const totA = num(d.totalAllowance) ? d.totalAllowance : fmt(sumA);
+    const totD = num(d.totalDeduction) ? d.totalDeduction : fmt(sumD);
+    const net = num(d.net) ? d.net : fmt(num(totA) - num(totD));
     const rows = a => a.map(r => `<div class="kv"><span>${esc(r.name)}</span><span>${esc(r.amount)}</span></div>`).join("") || '<div class="kv"><span>-</span><span></span></div>';
+    const tot = (l, v) => `<div class="kv" style="border-bottom:0;border-top:2px solid var(--gold);margin-top:4px"><span><b>${l}</b></span><span style="font-size:16px">${esc(v)}</span></div>`;
     $("out").innerHTML = `<div class="card">
       <div class="name">${esc(d.name||"Salary")}</div>
       <div class="sub">${esc(d.title||"")}${d.department?" • "+esc(d.department):""}${d.attendance?" • Attendance: "+esc(d.attendance):""}</div>
-      <div class="grid" style="grid-template-columns:repeat(3,1fr)">${stat("Allowance",d.totalAllowance,"g")+stat("Deduction",d.totalDeduction,"r")+stat("Net",d.net,"b")}</div>
-      <h4>Allowance</h4>${rows(d.allowance||[])}
-      <h4>Deduction</h4>${rows(d.deduction||[])}</div>`;
+      <div class="grid" style="grid-template-columns:repeat(3,1fr)">${stat("Allowance",totA,"g")+stat("Deduction",totD,"r")+stat("Net",net,"b")}</div>
+      <h4>Allowance</h4>${rows(A)}${tot("Total Allowance", totA)}
+      <h4>Deduction</h4>${rows(D)}${tot("Total Deduction", totD)}</div>`;
   }
 
 
