@@ -116,6 +116,22 @@ table{width:100%;border-collapse:collapse;font-size:12px}th{position:sticky;top:
 td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;font-weight:800}td.st{font-weight:800}
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===== Bubble click animation (notun feature) ===== */
+.tabwrap{position:relative}
+.drop{--bub:var(--bc,#fbeaa8);position:absolute;top:0;left:0;width:46px;height:46px;margin:-8px 0 0 -23px;border-radius:50%;background:var(--bub);
+  display:flex;align-items:center;justify-content:center;font-size:23px;line-height:1;pointer-events:none;opacity:0;z-index:20;
+  box-shadow:0 8px 16px var(--sh)}
+.drop::after{content:"";position:absolute;left:50%;top:70%;width:20px;height:0;margin-left:-10px;background:var(--bub);border-radius:0 0 10px 10px;z-index:-1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .drop{--bub:color-mix(in srgb,var(--bc,#fbeaa8) 42%,#0a2229)}}
+:root[data-theme="dark"] .drop{--bub:color-mix(in srgb,var(--bc,#fbeaa8) 42%,#0a2229)}
+.drop.go{animation:dropUp .85s cubic-bezier(.3,1.2,.4,1)}
+.drop.go::after{animation:neck .85s cubic-bezier(.3,1.2,.4,1)}
+@keyframes dropUp{0%{opacity:0;transform:translateY(30px) scale(.3)}35%{opacity:1;transform:translateY(-40px) scale(1)}65%{opacity:1;transform:translateY(-36px) scale(1)}100%{opacity:0;transform:translateY(10px) scale(.5)}}
+@keyframes neck{0%{height:0}35%{height:46px}65%{height:40px}100%{height:0}}
+.tab.on{animation:tabpop .5s cubic-bezier(.3,1.6,.5,1)}
+@keyframes tabpop{0%{transform:scale(.92)}100%{transform:scale(1)}}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -137,14 +153,14 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
 
   <!-- APP -->
   <div id="app">
-    <div class="tabs" id="tabs">
-      <button class="tab on" data-t="attendance">📅 Attendance</button>
-      <button class="tab" data-t="balance">🏖️ Leave</button>
-      <button class="tab" data-t="payslip">💰 Salary</button>
-      <button class="tab" data-t="purchase">🍽️ Canteen</button>
-      <button class="tab" data-t="trend">📈 Trend</button>
-      <button class="tab" data-t="iom">🕘 IOM</button>
-    </div>
+    <div class="tabwrap"><div class="tabs" id="tabs">
+      <button class="tab on" data-t="attendance" data-c="#fbeaa8">📅 Attendance</button>
+      <button class="tab" data-t="balance" data-c="#cdeedd">🏖️ Leave</button>
+      <button class="tab" data-t="payslip" data-c="#e2d9fb">💰 Salary</button>
+      <button class="tab" data-t="purchase" data-c="#ffd9c2">🍽️ Canteen</button>
+      <button class="tab" data-t="trend" data-c="#cfe6fb">📈 Trend</button>
+      <button class="tab" data-t="iom" data-c="#fbd0dc">🕘 IOM</button>
+    </div><div class="drop" id="drop" aria-hidden="true"></div></div>
     <div class="card" id="barCard">
       <div class="bar">
         <div><label>Month</label><select id="month"></select></div>
@@ -195,7 +211,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       $("pwd").value = "";
       $("loginCard").style.display = "none"; $("app").style.display = "block"; setMini(1);
       cache = {}; cache["attendance|" + key()] = d;
-      switchTab("attendance", true);
+      switchTab("attendance", "first");
     } catch (e) {
       cred = null;
       showErr($("loginErr"), e.message === "Failed to fetch" ? "Server-e connect hocche na. Internet check koro." : e.message);
@@ -211,8 +227,23 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
   document.querySelectorAll(".tab").forEach(b => b.onclick = () => switchTab(b.dataset.t));
   $("load").onclick = () => { delete cache[tab + "|" + key()]; switchTab(tab, true); };
 
+
+  // ---- bubble animation: tab-e chaple bubble uthe ----
+  const DROP = $("drop"), TABS = $("tabs");
+  function popBubble(t) {
+    const b = TABS.querySelector('.tab[data-t="' + t + '"]');
+    if (!b || !DROP) return;
+    DROP.style.setProperty("--bc", b.dataset.c || "#fbeaa8");
+    DROP.style.left = (b.offsetLeft - TABS.scrollLeft + b.offsetWidth / 2) + "px";
+    DROP.style.top = b.offsetTop + "px";
+    DROP.textContent = b.textContent.trim().split(" ")[0];
+    DROP.classList.remove("go"); void DROP.offsetWidth; DROP.classList.add("go");
+  }
+
   async function switchTab(t, force) {
+    const prevTab = tab;
     tab = t;
+    if (prevTab !== t || force === "first") popBubble(t);
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
     $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom") ? "none" : "block";
     showErr($("err"), "");
