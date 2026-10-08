@@ -9,6 +9,7 @@ const PAGES = {
   purchase: BASE + "/Pages/Payroll/PurchaseDetails.aspx",
   balance: BASE + "/Pages/Portal/QLvApplication.aspx",
   iom: BASE + "/Pages/Portal/QPersonalIOM.aspx",
+  order: BASE + "/Pages/ProductPurchase/ProductOrder.aspx",
 };
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -208,6 +209,19 @@ async function readOnlyPostback(url, jar, html, target) {
   return await r.text();
 }
 
+// Product Order page theke shudhu LIMIT dekha (GET only - kono button/order chape na)
+function parseLimit(html) {
+  const lbl = id => { const m = html.match(new RegExp('id="' + id + '"[^>]*>([\\s\\S]*?)</(?:span|div|label)>', "i")); return m ? text(m[1]) : ""; };
+  const st = allSelects(html).find(x => x.name && x.name.endsWith("ddlStore"));
+  return {
+    limit: lbl("cphMain_lblpLinit"),
+    total: lbl("cphMain_lblTotal"),
+    staffId: lbl("cphMain_lblStaffID"),
+    name: lbl("cphMain_lblName"),
+    stores: st ? st.options.filter(o => o.text && o.value !== "0").map(o => ({ value: o.value, name: o.text })) : [],
+  };
+}
+
 // Leave / IOM history table (header + date diye shuru hoya row)
 function parseHistory(html) {
   let headers = [];
@@ -239,7 +253,7 @@ module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const { id, pass, page, month, year, subhead } = req.body || {};
   if (!id || !pass) return res.status(400).json({ error: "ID/Password dao" });
-  if (!["attendance", "payslip", "purchase", "balance", "trend", "iom"].includes(page)) return res.status(400).json({ error: "Unknown page" });
+  if (!["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit"].includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
     const jar = await login(id, pass);
@@ -304,6 +318,14 @@ module.exports = async (req, res) => {
       try {
         d.history = parseHistory(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnShow"));
       } catch (e) { d.history = { headers: [], rows: [] }; }
+      return res.status(200).json(d);
+    }
+
+    if (page === "limit") {
+      const r = await get(PAGES.order, jar);
+      if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+      const d = parseLimit(await r.text());
+      if (!d.limit) throw new UserError("Product Order limit pai ni", 502);
       return res.status(200).json(d);
     }
 
