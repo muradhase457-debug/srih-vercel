@@ -132,6 +132,17 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
 .tab.on{animation:tabpop .5s cubic-bezier(.3,1.6,.5,1)}
 @keyframes tabpop{0%{transform:scale(.92)}100%{transform:scale(1)}}
 </style>
+<style>
+.pwl{text-align:right;font-size:12.5px;font-weight:800;padding:5px 0;border-bottom:1px dashed var(--line)}
+.tabs{cursor:grab;user-select:none;-webkit-user-select:none}
+.tabs.dragging{cursor:grabbing}
+.tabs.dragging .tab{pointer-events:none}
+.tabwrap .tarr{display:none;position:absolute;top:1px;margin:0;padding:0;width:34px;height:34px;border-radius:50%;border:1.5px solid var(--gold);background:var(--card);color:var(--ink);
+  font:900 20px/1 system-ui,sans-serif;align-items:center;justify-content:center;cursor:pointer;z-index:25;box-shadow:0 4px 10px var(--sh);text-shadow:none}
+.tabwrap .tarr::after{display:none}
+.tabwrap .tarr.l{left:-6px}.tabwrap .tarr.r{right:-6px}
+@media (hover:hover) and (pointer:fine){.tabwrap .tarr.show{display:flex}}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -284,7 +295,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     const td=String(now.getDate()).padStart(2,"0")+"/"+String(now.getMonth()+1).padStart(2,"0")+"/"+now.getFullYear();
     const tl=rows.map((r,i)=>{const p=String(r.date||"").split("/"),a=mins(r.inTime),b=mins(r.outTime),w=a!=null&&b!=null&&b>a?b-a:0,c=stC(r.status),isT=r.date===td;
       return `<div class="row${isT?" today":""}" style="--c:var(${isT?"--gold":c});--d:${Math.min(i*.04,1.2)}s"><div class="dt"><b>${esc(p[0]||"")}</b><span>${esc((MONTHS[(+p[1]||1)-1]||"").slice(0,3).toUpperCase())} · ${esc(String(r.day||"").slice(0,3).toUpperCase())}</span></div><div class="mid">${a!=null?esc(r.inTime)+" → "+esc(r.outTime||"–")+(w?`<small>${Math.floor(w/60)}h ${w%60}m kaj</small><div class="hb"><u data-w="${Math.min(100,w/7.2).toFixed(0)}"></u></div>`:""):"—<small>"+esc(r.status||"")+"</small>"}</div><span class="pill" style="background:var(${c})">${esc(r.status)}</span></div>`}).join("");
-    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av" style="background:url(${photoUrl(s.staffId||(cred&&cred.id))}) center/cover no-repeat,var(--hero) -94px -75px/244px no-repeat"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
+    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av" style="background:url(${(d.photo && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(d.photo)) ? d.photo : photoUrl(s.staffId||(cred&&cred.id))}) center/cover no-repeat,var(--hero) -94px -75px/244px no-repeat"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
       <div class="card rise" style="--d:.1s"><div class="sum"><div class="rg"><svg viewBox="0 0 140 140"><circle cx="70" cy="70" r="54" fill="none" stroke="rgba(127,150,160,.25)" stroke-width="14"/>${arcs}</svg><div class="rc"><b>${P}</b><span>days present</span></div></div><div class="lg">${seg.map(x=>`<div><i style="background:var(${x[1]})"></i>${x[2]} · ${x[0]}</div>`).join("")}</div></div>
       <div class="grid">${stat("Present",s.present,"g")+stat("Absent",ab,"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
       ${(+d.futureAbsent>0)?`<div class="sub" style="margin-top:10px">ℹ️ HRIS shows ${esc(s.absent)} absent, but ${esc(d.futureAbsent)} of those days have not happened yet (days after today), so they are excluded above.</div>`:""}
@@ -354,7 +365,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       <div class="name">${esc(d.name||"Salary")}</div>
       <div class="sub">${esc(d.title||"")}${d.department?" • "+esc(d.department):""}${d.attendance?" • Attendance: "+esc(d.attendance):""}</div>
       <div class="grid" style="grid-template-columns:repeat(3,1fr)">${stat("Allowance",totA,"g")+stat("Deduction",totD,"r")+stat("Net",net,"b")}</div>
-      <h4>Allowance</h4>${rows(A)}${tot("Total Allowance", totA)}
+      <h4>Allowance</h4>${rows(A)}${tot("Total Allowance", totA)}${(d.words && d.words.length) ? `<div class="sub" style="text-align:right;margin-top:6px">As written by HRIS</div>` + d.words.map(x => `<div class="pwl">${esc(x)}</div>`).join("") : ""}
       <h4>Deduction</h4>${rows(D)}${tot("Total Deduction", totD)}</div>`;
   }
 
@@ -400,6 +411,41 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     ["pointermove","touchmove","touchstart"].forEach(n=>S.addEventListener(n,pt,{passive:true}));
     ["pointerleave","touchend"].forEach(n=>S.addEventListener(n,()=>set(0,0,30,15)));
     addEventListener("deviceorientation",e=>{if(e.gamma==null)return;const rx=Math.max(-10,Math.min(10,(e.beta-55)/4)),ry=Math.max(-14,Math.min(14,e.gamma/3));set(rx.toFixed(1),ry.toFixed(1),(50+ry*3).toFixed(0),(30-rx*3).toFixed(0))});
+  })();
+
+  // ---- PC: scroll the tab strip with the mouse wheel, by dragging, or with the arrow buttons ----
+  (function () {
+    const wrap = TABS.parentElement;
+    const mk = (cls, ch, dir) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "tarr " + cls; b.textContent = ch;
+      b.setAttribute("aria-label", dir < 0 ? "Scroll tabs left" : "Scroll tabs right");
+      b.onclick = () => TABS.scrollBy({ left: dir * 220, behavior: "smooth" });
+      wrap.appendChild(b); return b;
+    };
+    const L = mk("l", "\u2039", -1), R = mk("r", "\u203A", 1);
+    const upd = () => {
+      const max = TABS.scrollWidth - TABS.clientWidth;
+      L.classList.toggle("show", TABS.scrollLeft > 4);
+      R.classList.toggle("show", TABS.scrollLeft < max - 4);
+    };
+    TABS.addEventListener("scroll", upd, { passive: true });
+    window.addEventListener("resize", upd);
+    if (window.ResizeObserver) new ResizeObserver(upd).observe(TABS);
+    upd();
+    TABS.addEventListener("wheel", e => {
+      if (TABS.scrollWidth > TABS.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { TABS.scrollLeft += e.deltaY; e.preventDefault(); }
+    }, { passive: false });
+    let down = false, moved = false, sx = 0, sl = 0;
+    TABS.addEventListener("pointerdown", e => { if (e.pointerType !== "mouse" || e.button !== 0) return; down = true; moved = false; sx = e.clientX; sl = TABS.scrollLeft; });
+    window.addEventListener("pointermove", e => {
+      if (!down) return;
+      const dx = e.clientX - sx;
+      if (!moved && Math.abs(dx) > 5) { moved = true; TABS.classList.add("dragging"); }
+      if (moved) TABS.scrollLeft = sl - dx;
+    });
+    window.addEventListener("pointerup", () => { if (down && moved) setTimeout(() => TABS.classList.remove("dragging"), 0); down = false; });
+    TABS.addEventListener("click", e => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
   })();
 </script>
 </body>
