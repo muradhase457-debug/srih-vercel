@@ -1,5 +1,5 @@
-// SRIH - Vercel Function: PRAN-RFL HRIS proxy (shudhu DEKHAR page, kono apply/save na)
-// ID/Password kothao store ba log hoy na.
+// SRIH - Vercel Function: PRAN-RFL HRIS proxy (view-only pages; never applies or saves anything)
+// ID/Password are never stored or logged.
 
 const BASE = "http://hris.prangroup.com:8686";
 const LOGIN_URL = BASE + "/Login.aspx";
@@ -39,7 +39,7 @@ function allSelects(html) {
     })),
   }));
 }
-// form-er sob field (button/submit chhara) - ASP.NET postback-er jonno
+// all form fields (except buttons/submit) - needed for an ASP.NET postback
 function formFields(html) {
   const f = {};
   for (const i of allInputs(html)) {
@@ -95,21 +95,21 @@ async function login(id, pass) {
   const userField = ins.find(i => i.type === "text" && i.name);
   const passField = ins.find(i => i.type === "password" && i.name);
   const btn = ins.find(i => (i.type === "submit" || i.type === "button" || i.type === "image") && i.name);
-  if (!userField || !passField) throw new UserError("HRIS login form pai ni (status " + r1.status + ")", 502);
+  if (!userField || !passField) throw new UserError("Could not find the HRIS login form (status " + r1.status + ")", 502);
   const f = {};
   for (const i of ins) if (i.type === "hidden" && i.name) f[i.name] = i.value;
   f[userField.name] = id; f[passField.name] = pass;
   if (btn) f[btn.name] = btn.value || "Login";
   const r2 = await post(LOGIN_URL, jar, f);
   const h2 = r2.status === 200 ? await r2.text() : "";
-  if (r2.status === 200 && /type\s*=\s*["']?password/i.test(h2)) throw new UserError("Login failed: ID ba Password vul", 401);
+  if (r2.status === 200 && /type\s*=\s*["']?password/i.test(h2)) throw new UserError("Login failed: wrong ID or password", 401);
   return jar;
 }
 
-// year/month select kore Show chape
+// select year/month, then press Show
 async function showMonth(url, jar, year, month, extra = {}) {
   const r = await get(url, jar);
-  if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+  if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
   const h = await r.text();
   const f = formFields(h);
   setSelect(h, "ddlYear", f, String(year));
@@ -171,6 +171,8 @@ function parsePayslip(html) {
     attendance: grab(/Attendance\s+(\d+)/i),
     allowance, deduction, totalAllowance, totalDeduction,
     net: (num(totalAllowance) - num(totalDeduction)).toFixed(2),
+    // the lines HRIS prints in words under Total Allowance (same order as on HRIS)
+    words: [...html.matchAll(/<span[^>]*id="[^"]*rpt_lbl(?:bpay|cpay|ptxt)_\d+"[^>]*>([\s\S]*?)<\/span>/gi)].map(m => text(m[1])).filter(Boolean),
   };
 }
 
@@ -197,11 +199,11 @@ function parseBalance(html) {
 }
 
 
-// ---------- SAFETY: shudhu dekhar button-e postback ----------
-// Save / Delete / Edit / Apply kono button ei site kokhono chape na.
+// ---------- SAFETY: postbacks only for read-only buttons ----------
+// This site never presses Save / Delete / Edit / Apply buttons.
 const SAFE_TARGETS = new Set(["ctl00$cphMain$btnShow", "ctl00$cphMain$btnView"]);
 async function readOnlyPostback(url, jar, html, target) {
-  if (!SAFE_TARGETS.has(target)) throw new UserError("Blocked: shudhu dekhar button allowed", 403);
+  if (!SAFE_TARGETS.has(target)) throw new UserError("Blocked: only read-only buttons are allowed", 403);
   const f = formFields(html);
   f["__EVENTTARGET"] = target;
   f["__EVENTARGUMENT"] = "";
@@ -209,7 +211,7 @@ async function readOnlyPostback(url, jar, html, target) {
   return await r.text();
 }
 
-// Product Order page theke shudhu LIMIT dekha (GET only - kono button/order chape na)
+// Product Order page: read the LIMIT only (GET only - never presses a button or places an order)
 function parseLimit(html) {
   const lbl = id => { const m = html.match(new RegExp('id="' + id + '"[^>]*>([\\s\\S]*?)</(?:span|div|label)>', "i")); return m ? text(m[1]) : ""; };
   const st = allSelects(html).find(x => x.name && x.name.endsWith("ddlStore"));
@@ -222,7 +224,7 @@ function parseLimit(html) {
   };
 }
 
-// Leave / IOM history table (header + date diye shuru hoya row)
+// Leave / IOM history table (header row + rows that start with a date)
 function parseHistory(html) {
   let headers = [];
   const rows = [];
@@ -232,13 +234,13 @@ function parseHistory(html) {
     const c = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m => text(m[1]));
     if (c.length >= 4 && /^\d{2}\/\d{2}\/\d{4}$/.test(c[0])) rows.push(c);
   }
-  // Action column (edit/delete) bad dao
+  // Drop the Action column (edit/delete)
   const ai = headers.findIndex(h => /^action$/i.test(h));
   if (ai >= 0) { headers = headers.filter((_, i) => i !== ai); for (let i = 0; i < rows.length; i++) rows[i] = rows[i].filter((_, j) => j !== ai); }
   return { headers, rows: rows.slice(0, 60) };
 }
 
-// Bangladesh-er ajker tarikh-er por-er din-gulo (HRIS ekhono-ashe-ni din-ke Absent dhore)
+// Days after today in Bangladesh (HRIS counts not-yet-happened days as Absent)
 function dhakaToday() { const d = new Date(Date.now() + 6 * 3600 * 1000); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 function countFutureAbsent(rows) {
   const t = dhakaToday();
@@ -248,11 +250,31 @@ function countFutureAbsent(rows) {
   }).length;
 }
 
+// Profile photo -> data URI (only from the HRIS host, small images only; null on any problem)
+async function fetchPhoto(src, jar) {
+  try {
+    if (!src) return { url: "", data: null };
+    const u = new URL(src);
+    if (!/^hris\.prangroup\.com$/i.test(u.hostname) || !/^https?:$/.test(u.protocol)) return { url: "", data: null };
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 6000);
+    let data = null;
+    try {
+      const r = await fetch(u.href, { headers: { ...UA, Cookie: cookieHeader(jar) }, signal: ac.signal, redirect: "manual" });
+      const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (r.ok && /^image\/(jpeg|png|webp|gif)$/.test(ct)) {
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 100 && buf.length <= 250000) data = "data:" + ct + ";base64," + buf.toString("base64");
+      }
+    } finally { clearTimeout(t); }
+    return { url: u.href, data };
+  } catch (e) { return { url: "", data: null }; }
+}
+
 // ---------- handler ----------
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   const { id, pass, page, month, year, subhead } = req.body || {};
-  if (!id || !pass) return res.status(400).json({ error: "ID/Password dao" });
+  if (!id || !pass) return res.status(400).json({ error: "Enter your ID and password" });
   if (!["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit"].includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
@@ -260,17 +282,22 @@ module.exports = async (req, res) => {
     const mo = month || (new Date().getMonth() + 1), yr = year || new Date().getFullYear();
 
     if (page === "attendance") {
-      const { html } = await showMonth(PAGES.attendance, jar, yr, mo);
+      const { html, page: pg0 } = await showMonth(PAGES.attendance, jar, yr, mo);
       const d = parseAttendance(html);
-      if (!d.rows.length) throw new UserError("Attendance data pailam na", 502);
+      if (!d.rows.length) throw new UserError("Could not find attendance data", 502);
       d.futureAbsent = countFutureAbsent(d.rows);
+      // the logged-in user's own profile photo (shown in the avatar); optional, never blocks the data
+      const both = html + (pg0 || "");
+      const im = both.match(/id="Header_imgProfile2"[^>]*src="([^"]+)"/i) || both.match(/src="([^"]+)"[^>]*id="Header_imgProfile2"/i);
+      const ph = await fetchPhoto(im ? im[1] : "", jar);
+      d.photo = ph.data; d.photoUrl = ph.url;
       return res.status(200).json(d);
     }
 
     if (page === "payslip") {
       const { html } = await showMonth(PAGES.payslip, jar, yr, mo);
       const d = parsePayslip(html);
-      if (!d.allowance.length && !d.deduction.length) throw new UserError("Ei mash-er Allowance/Deduction data nai", 404);
+      if (!d.allowance.length && !d.deduction.length) throw new UserError("No Allowance/Deduction data for this month", 404);
       return res.status(200).json(d);
     }
 
@@ -312,7 +339,7 @@ module.exports = async (req, res) => {
 
     if (page === "balance") {
       const r = await get(PAGES.balance, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
       const h = await r.text();
       const d = parseBalance(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnView"));
       try {
@@ -323,15 +350,15 @@ module.exports = async (req, res) => {
 
     if (page === "limit") {
       const r = await get(PAGES.order, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
       const d = parseLimit(await r.text());
-      if (!d.limit) throw new UserError("Product Order limit pai ni", 502);
+      if (!d.limit) throw new UserError("Could not find the Product Order limit", 502);
       return res.status(200).json(d);
     }
 
     if (page === "iom") {
       const r = await get(PAGES.iom, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login hoy ni (redirect)", 401);
+      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
       const h = await r.text();
       const hist = parseHistory(await readOnlyPostback(PAGES.iom, jar, h, "ctl00$cphMain$btnShow"));
       return res.status(200).json(hist);
