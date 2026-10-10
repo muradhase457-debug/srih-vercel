@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#c3ccd3" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0a2229" media="(prefers-color-scheme: dark)">
-<link rel="preload" href="/hero.webp?v=2" as="image" type="image/webp">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon.svg">
@@ -14,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="HRM-MD">
 <title>HRM by MD</title>
 <style>
-:root{--green:var(--g);--red:var(--r);--amber:var(--a);--blue:var(--b);--purple:var(--p);--muted:var(--mut);--hero:url("/hero.webp?v=2");--ink:#0f2a30;--mut:#42585f;--card:rgba(255,255,255,.6);--in:rgba(255,255,255,.55);--gold:#b8913a;--teal:#1d7c78;--g:#3a8626;--a:#9a6f10;--r:#b24a3a;--b:#2559d8;--p:#5a55d0;--sh:rgba(15,42,48,.38);--pt:#fff;--line:rgba(29,124,120,.4);--bg:radial-gradient(120% 80% at 50% 25%,#e3e7ea,#b8c1c9 65%,#9ea9b3);
+:root{--green:var(--g);--red:var(--r);--amber:var(--a);--blue:var(--b);--purple:var(--p);--muted:var(--mut);--hero:url("/hero.webp");--ink:#0f2a30;--mut:#42585f;--card:rgba(255,255,255,.6);--in:rgba(255,255,255,.55);--gold:#b8913a;--teal:#1d7c78;--g:#3a8626;--a:#9a6f10;--r:#b24a3a;--b:#2559d8;--p:#5a55d0;--sh:rgba(15,42,48,.38);--pt:#fff;--line:rgba(29,124,120,.4);--bg:radial-gradient(120% 80% at 50% 25%,#e3e7ea,#b8c1c9 65%,#9ea9b3);
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#eefaf8;--mut:#b2cbc8;--card:rgba(9,32,40,.68);--in:rgba(3,20,26,.5);--gold:#e6cb80;--teal:#47cabc;--g:#94e06f;--a:#f2cf76;--r:#ff9a8a;--b:#82b3ff;--p:#aeaaff;--sh:rgba(0,0,0,.6);--pt:#07202a;--line:rgba(71,202,188,.4);--bg:radial-gradient(120% 80% at 50% 20%,#154048,#0a2229 60%,#051118)}}
 :root[data-theme="dark"]{--ink:#eefaf8;--mut:#b2cbc8;--card:rgba(9,32,40,.68);--in:rgba(3,20,26,.5);--gold:#e6cb80;--teal:#47cabc;--g:#94e06f;--a:#f2cf76;--r:#ff9a8a;--b:#82b3ff;--p:#aeaaff;--sh:rgba(0,0,0,.6);--pt:#07202a;--line:rgba(71,202,188,.4);--bg:radial-gradient(120% 80% at 50% 20%,#154048,#0a2229 60%,#051118)}
@@ -248,6 +247,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
 .mini .rays,.mini .fx{display:none}
 @media (prefers-reduced-motion:reduce){.rays,.fx *:not(.cl):not(.cl *),.c1{animation:none!important}}
 </style>
+<link rel="preload" as="image" href="/hero.webp">
 </head>
 <body>
 <div class="wrap">
