@@ -343,7 +343,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     let res, data;
     for (let t = 0; t < 2; t++) {
       res = await fetch(API, { method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ id: cred.id, pass: cred.pass, page, month: $("month").value, year: $("year").value, ...extra }) });
+        body: JSON.stringify({ id: cred.id, pass: cred.pass, sess: cred.sess, page, month: $("month").value, year: $("year").value, ...extra }) });
       try { data = await res.json(); } catch { throw new Error("Invalid response from server (" + res.status + ")"); }
       // HRIS only timed out (flaky route): try once more automatically
       if (!(res.status === 502 && /timeout|reach kora/i.test((data && data.error) || "")) || t === 1) break;
@@ -351,6 +351,8 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       await new Promise(r => setTimeout(r, 1200));
     }
     if (!res.ok || data.error) throw new Error(data.error || "Server error");
+    if (data.sess && cred) { cred.sess = data.sess; }   // HRIS session kept in memory only, so the next tabs open fast
+    delete data.sess;
     return data;
   }
 
@@ -369,6 +371,12 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       $("loginCard").style.display = "none"; $("app").style.display = "block"; setMini(1);
       cache = {}; cache["attendance|" + key()] = d;
       switchTab("attendance", "first");
+      call("photo").then(p => {
+        if (cred && p && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(p.photo || "")) {
+          cred.photo = p.photo;
+          document.querySelectorAll(".av").forEach(a => { a.style.background = "url(" + p.photo + ") center/cover no-repeat, var(--hero) -94px -75px/244px no-repeat"; });
+        }
+      }).catch(() => {});
     } catch (e) {
       cred = null;
       showErr($("loginErr"), e.message === "Failed to fetch" ? "Can't reach the server. Please check your internet connection." : e.message);
@@ -440,7 +448,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     const td=String(now.getDate()).padStart(2,"0")+"/"+String(now.getMonth()+1).padStart(2,"0")+"/"+now.getFullYear();
     const tl=rows.map((r,i)=>{const p=String(r.date||"").split("/"),a=mins(r.inTime),b=mins(r.outTime),w=a!=null&&b!=null&&b>a?b-a:0,c=stC(r.status),isT=r.date===td;
       return `<div class="row${isT?" today":""}" style="--c:var(${isT?"--gold":c});--d:${Math.min(i*.04,1.2)}s"><div class="dt"><b>${esc(p[0]||"")}</b><span>${esc((MONTHS[(+p[1]||1)-1]||"").slice(0,3).toUpperCase())} · ${esc(String(r.day||"").slice(0,3).toUpperCase())}</span></div><div class="mid">${a!=null?esc(r.inTime)+" → "+esc(r.outTime||"–")+(w?`<small>${Math.floor(w/60)}h ${w%60}m kaj</small><div class="hb"><u data-w="${Math.min(100,w/7.2).toFixed(0)}"></u></div>`:""):"—<small>"+esc(r.status||"")+"</small>"}</div><span class="pill" style="background:var(${c})">${esc(r.status)}</span></div>`}).join("");
-    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av" style="background:url(${(d.photo && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(d.photo)) ? d.photo : photoUrl(s.staffId||(cred&&cred.id))}) center/cover no-repeat,var(--hero) -94px -75px/244px no-repeat"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
+    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av" style="background:url(${(cred && cred.photo) ? cred.photo : (d.photo && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(d.photo)) ? d.photo : photoUrl(s.staffId||(cred&&cred.id))}) center/cover no-repeat,var(--hero) -94px -75px/244px no-repeat"></div><div><div class="name">${esc(s.name||"My Attendance")}</div><div class="sub">Staff ID: ${esc(s.staffId||"-")} • Total Days: ${esc(s.totalDays||"-")}${s.payableDays?" • Payable: "+esc(s.payableDays):""}${s.lateMinutes?" • Late Min: "+esc(s.lateMinutes):""}</div></div></div></div>
       <div class="card rise" style="--d:.1s"><div class="sum"><div class="rg"><svg viewBox="0 0 140 140"><circle cx="70" cy="70" r="54" fill="none" stroke="rgba(127,150,160,.25)" stroke-width="14"/>${arcs}</svg><div class="rc"><b>${P}</b><span>days present</span></div></div><div class="lg">${seg.map(x=>`<div><i style="background:var(${x[1]})"></i>${x[2]} · ${x[0]}</div>`).join("")}</div></div>
       <div class="grid">${stat("Present",s.present,"g")+stat("Absent",ab,"r")+stat("Late",s.late,"a")+stat("Leave (Pay)",s.leaveWithPay,"b")+stat("Leave (No Pay)",s.leaveWithoutPay,"p")+stat("Holiday",s.holiday,"s")}</div>
       ${(+d.futureAbsent>0)?`<div class="sub" style="margin-top:10px">ℹ️ HRIS shows ${esc(s.absent)} absent, but ${esc(d.futureAbsent)} of those days have not happened yet (days after today), so they are excluded above.</div>`:""}
