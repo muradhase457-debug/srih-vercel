@@ -70,18 +70,40 @@ function updateJar(res, jar) {
 }
 const cookieHeader = jar => Object.entries(jar).map(([k, v]) => k + "=" + v).join("; ");
 
-// HRIS sometimes needs a second try when the connection can't be opened (connect timeout / refused / DNS hiccup).
-// Only "could not connect" errors are retried, so nothing is ever sent twice.
+// HRIS sometimes cannot open a connection quickly (connect timeout). Fixes:
+//  - GET (safe to repeat): if the first connection is slow to open, start a 2nd (after 3s) and 3rd (after 6s) one; the first answer wins.
+//  - POST: only retried when the connection could not even be opened (so nothing is ever sent twice).
+const CONNECT_ERR = ["UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT"];
+const retryable = e => CONNECT_ERR.includes(e && e.cause && e.cause.code);
+function hedgedGet(url, opts) {
+  return new Promise((resolve, reject) => {
+    const ctrls = []; let done = false, started = 0, failed = 0, timer = null, lastErr;
+    const stop = keep => { done = true; clearTimeout(timer); ctrls.forEach(c => { if (c !== keep) { try { c.abort(); } catch (_) {} } }); };
+    const launch = () => {
+      if (done || started >= 3) return;
+      started++;
+      const ac = new AbortController(); ctrls.push(ac);
+      fetch(url, { ...opts, signal: ac.signal }).then(r => {
+        if (done) { try { r.body && r.body.cancel(); } catch (_) {} return; }
+        stop(ac); resolve(r);
+      }).catch(e => {
+        if (done) return;
+        lastErr = e; failed++;
+        if (!retryable(e)) { stop(null); return reject(e); }
+        if (failed >= started) { if (started < 3) launch(); else { stop(null); reject(lastErr); } }
+      });
+      if (started < 3) timer = setTimeout(launch, 3000);
+    };
+    launch();
+  });
+}
 async function fx(url, opts) {
+  const isGet = !opts || !opts.method || String(opts.method).toUpperCase() === "GET";
+  if (isGet) return hedgedGet(url, opts);
   let last;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     try { return await fetch(url, opts); }
-    catch (e) {
-      last = e;
-      const c = e && e.cause && e.cause.code;
-      if (!["UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT"].includes(c)) throw e;
-      await new Promise(r => setTimeout(r, 700));
-    }
+    catch (e) { last = e; if (!retryable(e)) throw e; }
   }
   throw last;
 }
@@ -269,9 +291,9 @@ function countFutureAbsent(rows) {
 async function fetchPhoto(src, jar) {
   try {
     if (!src) return { url: "", data: null };
-    const u = new URL(src);
+    const u = new URL(src, BASE + "/Pages/Portal/");
     if (!/^hris\.prangroup\.com$/i.test(u.hostname) || !/^https?:$/.test(u.protocol)) return { url: "", data: null };
-    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 6000);
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 4000);
     let data = null;
     try {
       const r = await fetch(u.href, { headers: { ...UA, Cookie: cookieHeader(jar) }, signal: ac.signal, redirect: "manual" });
@@ -285,99 +307,127 @@ async function fetchPhoto(src, jar) {
   } catch (e) { return { url: "", data: null }; }
 }
 
+// ---------- session reuse ----------
+// After one login the browser keeps the HRIS session cookie in memory and sends it back, so the next tabs skip the login.
+function cleanSess(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const out = {}; let n = 0;
+  for (const [k, v] of Object.entries(x)) {
+    if (++n > 12) break;
+    if (/^[A-Za-z0-9_.\-]{1,64}$/.test(k) && typeof v === "string" && v.length <= 2000 && !/[;\r\n]/.test(v)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+const PAGE_LIST = ["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit", "photo"];
+
+async function runPage(page, jar, { yr, mo, subhead }) {
+  if (page === "attendance") {
+    const { html } = await showMonth(PAGES.attendance, jar, yr, mo);
+    const d = parseAttendance(html);
+    if (!d.rows.length) throw new UserError("Could not find attendance data", 502);
+    d.futureAbsent = countFutureAbsent(d.rows);
+    return d;
+  }
+
+  if (page === "photo") {   // the logged-in user's own profile photo; loaded in the background, never blocks the data
+    const r = await get(PAGES.attendance, jar);
+    if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
+    const h = await r.text();
+    const im = h.match(/id="Header_imgProfile2"[^>]*src="([^"]+)"/i) || h.match(/src="([^"]+)"[^>]*id="Header_imgProfile2"/i);
+    const ph = await fetchPhoto(im ? im[1] : "", jar);
+    return { photo: ph.data, photoUrl: ph.url };
+  }
+
+  if (page === "payslip") {
+    const { html } = await showMonth(PAGES.payslip, jar, yr, mo);
+    const d = parsePayslip(html);
+    if (!d.allowance.length && !d.deduction.length) throw new UserError("No Allowance/Deduction data for this month", 404);
+    return d;
+  }
+
+  if (page === "purchase") {
+    const tries = subhead ? [String(subhead)] : ["73", "74"];
+    let result = null, subheads = [];
+    for (const sh of tries) {
+      const { html, page: p0 } = await showMonth(PAGES.purchase, jar, yr, mo, { ddlSubHead: sh });
+      const sel = allSelects(p0).find(s => s.name && s.name.endsWith("ddlSubHead"));
+      if (sel) subheads = sel.options.filter(o => o.value !== "0").map(o => ({ value: o.value, name: o.text }));
+      const d = parsePurchase(html);
+      if (d.items.length || !result) result = d;
+      if (d.items.length) { result.subhead = sh; break; }
+    }
+    result.subheads = subheads;
+    return result;
+  }
+
+  if (page === "trend") {
+    // last 4 months attendance summary
+    const out = [];
+    const base = new Date(Number(yr), Number(mo) - 1, 1);
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+      const m = d.getMonth() + 1, y = d.getFullYear();
+      try {
+        const { html } = await showMonth(PAGES.attendance, jar, y, m);
+        const a = parseAttendance(html);
+        const s = a.summary;
+        out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: a.rows.length > 0,
+          present: +s.present || 0, absent: +s.absent || 0, late: +s.late || 0, lateMinutes: +s.lateMinutes || 0,
+          holiday: +s.holiday || 0, leave: (+s.leaveWithPay || 0) + (+s.leaveWithoutPay || 0), future: countFutureAbsent(a.rows) });
+      } catch (e) {
+        if (e instanceof UserError && e.code === 401) throw e;   // session problem: let the caller log in again
+        out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: false, present: 0, absent: 0, late: 0, lateMinutes: 0, holiday: 0, leave: 0, future: 0 });
+      }
+    }
+    return { months: out };
+  }
+
+  if (page === "balance") {
+    const r = await get(PAGES.balance, jar);
+    if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
+    const h = await r.text();
+    const d = parseBalance(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnView"));
+    try {
+      d.history = parseHistory(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnShow"));
+    } catch (e) { d.history = { headers: [], rows: [] }; }
+    return d;
+  }
+
+  if (page === "limit") {
+    const r = await get(PAGES.order, jar);
+    if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
+    const d = parseLimit(await r.text());
+    if (!d.limit) throw new UserError("Could not find the Product Order limit", 502);
+    return d;
+  }
+
+  if (page === "iom") {
+    const r = await get(PAGES.iom, jar);
+    if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
+    const h = await r.text();
+    return parseHistory(await readOnlyPostback(PAGES.iom, jar, h, "ctl00$cphMain$btnShow"));
+  }
+  throw new UserError("Unknown page", 400);
+}
+
 // ---------- handler ----------
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
-  const { id, pass, page, month, year, subhead } = req.body || {};
+  const { id, pass, page, month, year, subhead, sess } = req.body || {};
   if (!id || !pass) return res.status(400).json({ error: "Enter your ID and password" });
-  if (!["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit"].includes(page)) return res.status(400).json({ error: "Unknown page" });
+  if (!PAGE_LIST.includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
-    const jar = await login(id, pass);
-    const mo = month || (new Date().getMonth() + 1), yr = year || new Date().getFullYear();
-
-    if (page === "attendance") {
-      const { html, page: pg0 } = await showMonth(PAGES.attendance, jar, yr, mo);
-      const d = parseAttendance(html);
-      if (!d.rows.length) throw new UserError("Could not find attendance data", 502);
-      d.futureAbsent = countFutureAbsent(d.rows);
-      // the logged-in user's own profile photo (shown in the avatar); optional, never blocks the data
-      const both = html + (pg0 || "");
-      const im = both.match(/id="Header_imgProfile2"[^>]*src="([^"]+)"/i) || both.match(/src="([^"]+)"[^>]*id="Header_imgProfile2"/i);
-      const ph = await fetchPhoto(im ? im[1] : "", jar);
-      d.photo = ph.data; d.photoUrl = ph.url;
-      return res.status(200).json(d);
+    const p = { yr: year || new Date().getFullYear(), mo: month || (new Date().getMonth() + 1), subhead };
+    let jar = cleanSess(sess), data = null;
+    if (jar) {   // saved session: no login needed; if it expired, fall back to a normal login
+      try { data = await runPage(page, jar, p); }
+      catch (e) { if (e instanceof UserError && (e.code === 401 || e.code === 502)) { jar = null; data = null; } else throw e; }
     }
-
-    if (page === "payslip") {
-      const { html } = await showMonth(PAGES.payslip, jar, yr, mo);
-      const d = parsePayslip(html);
-      if (!d.allowance.length && !d.deduction.length) throw new UserError("No Allowance/Deduction data for this month", 404);
-      return res.status(200).json(d);
-    }
-
-    if (page === "purchase") {
-      const tries = subhead ? [String(subhead)] : ["73", "74"];
-      let result = null, subheads = [];
-      for (const sh of tries) {
-        const { html, page: p0 } = await showMonth(PAGES.purchase, jar, yr, mo, { ddlSubHead: sh });
-        const sel = allSelects(p0).find(s => s.name && s.name.endsWith("ddlSubHead"));
-        if (sel) subheads = sel.options.filter(o => o.value !== "0").map(o => ({ value: o.value, name: o.text }));
-        const d = parsePurchase(html);
-        if (d.items.length || !result) result = d;
-        if (d.items.length) { result.subhead = sh; break; }
-      }
-      result.subheads = subheads;
-      return res.status(200).json(result);
-    }
-
-    if (page === "trend") {
-      // last 4 mash-er attendance summary (ekbar login, ek ek kore mash)
-      const out = [];
-      const base = new Date(Number(yr), Number(mo) - 1, 1);
-      for (let i = 0; i < 4; i++) {
-        const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-        const m = d.getMonth() + 1, y = d.getFullYear();
-        try {
-          const { html } = await showMonth(PAGES.attendance, jar, y, m);
-          const a = parseAttendance(html);
-          const s = a.summary;
-          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: a.rows.length > 0,
-            present: +s.present || 0, absent: +s.absent || 0, late: +s.late || 0, lateMinutes: +s.lateMinutes || 0,
-            holiday: +s.holiday || 0, leave: (+s.leaveWithPay || 0) + (+s.leaveWithoutPay || 0), future: countFutureAbsent(a.rows) });
-        } catch (e) {
-          out.push({ label: MONTHS[m - 1].slice(0, 3) + " " + y, ok: false, present: 0, absent: 0, late: 0, lateMinutes: 0, holiday: 0, leave: 0, future: 0 });
-        }
-      }
-      return res.status(200).json({ months: out });
-    }
-
-    if (page === "balance") {
-      const r = await get(PAGES.balance, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
-      const h = await r.text();
-      const d = parseBalance(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnView"));
-      try {
-        d.history = parseHistory(await readOnlyPostback(PAGES.balance, jar, h, "ctl00$cphMain$btnShow"));
-      } catch (e) { d.history = { headers: [], rows: [] }; }
-      return res.status(200).json(d);
-    }
-
-    if (page === "limit") {
-      const r = await get(PAGES.order, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
-      const d = parseLimit(await r.text());
-      if (!d.limit) throw new UserError("Could not find the Product Order limit", 502);
-      return res.status(200).json(d);
-    }
-
-    if (page === "iom") {
-      const r = await get(PAGES.iom, jar);
-      if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
-      const h = await r.text();
-      const hist = parseHistory(await readOnlyPostback(PAGES.iom, jar, h, "ctl00$cphMain$btnShow"));
-      return res.status(200).json(hist);
-    }
+    if (!data) { jar = await login(id, pass); data = await runPage(page, jar, p); }
+    data.sess = jar;
+    return res.status(200).json(data);
   } catch (e) {
     const code = e instanceof UserError ? e.code : 502;
     const ec = e && e.cause && e.cause.code;
