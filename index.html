@@ -247,6 +247,22 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
 .mini .rays,.mini .fx{display:none}
 @media (prefers-reduced-motion:reduce){.rays,.fx *:not(.cl):not(.cl *),.c1{animation:none!important}}
 </style>
+<style>
+/* ===== Profile tab (new) ===== */
+.tabs .tab[data-t="profile"]{--c:#10b981}
+.pps{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 14px;margin:0 -2px}.pps::-webkit-scrollbar{display:none}
+.pp{flex:none;width:auto;margin:0;padding:9px 14px;overflow:visible;border-radius:99px;border:1.5px solid var(--line);background:var(--in);color:var(--ink);font:inherit;font-weight:800;font-size:12.5px;text-shadow:none;box-shadow:none;cursor:pointer}
+.pp::after{display:none}
+.pp.on{color:#fff;border-color:var(--gold);background:linear-gradient(180deg,#36a89c,#1d6f6f 60%,#165457)}
+.kv span.nil{color:var(--muted);font-weight:700}
+.kv span:first-child{flex:none;max-width:46%;color:var(--muted);font-size:13px}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.pgrid figure{margin:0;text-align:center}
+.pgrid img,.pgrid .na{display:block;width:100%;aspect-ratio:1;border-radius:16px;border:1.5px solid var(--gold);background:var(--in)}
+.pgrid img{object-fit:contain}
+.pgrid .na{display:grid;place-content:center;font-size:11.5px;font-weight:800;color:var(--muted);padding:8px}
+.pgrid figcaption{font-size:12px;font-weight:800;margin-top:6px}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -310,6 +326,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       <button class="tab" data-t="trend" data-c="#cfe6fb">📈 Trend</button>
       <button class="tab" data-t="limit" data-c="#fde7b0">🛒 Limit</button>
       <button class="tab" data-t="iom" data-c="#fbd0dc">🕘 IOM</button>
+      <button class="tab" data-t="profile" data-c="#c9f0e0">👤 Profile</button>
     </div><div class="drop" id="drop" aria-hidden="true"></div></div>
     <div class="card" id="barCard">
       <div class="bar">
@@ -410,9 +427,9 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     tab = t;
     if (prevTab !== t || force === "first") popBubble(t);
     document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-    $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom" || t === "limit") ? "none" : "block";
+    $("barCard").style.display = (t === "balance" || t === "trend" || t === "iom" || t === "limit" || t === "profile") ? "none" : "block";
     showErr($("err"), "");
-    const ck = t + "|" + key();
+    const ck = t + "|" + (t === "profile" ? "" : key());
     if (cache[ck]) return render(t, cache[ck]);
     $("out").innerHTML = '<div class="loading">Loading...</div>';
     try {
@@ -434,6 +451,7 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
     if (t === "trend") return renderTrend(d);
     if (t === "iom") return renderIom(d);
     if (t === "limit") return renderLimit(d);
+    if (t === "profile") return renderProfile(d);
   }
 
   function mins(t){const m=/(\d{1,2}):(\d{2})\s*([AP]M)?/i.exec(t||"");if(!m)return null;let h=+m[1];if(m[3])h=h%12+(/p/i.test(m[3])?12:0);return h*60+ +m[2]}
@@ -552,6 +570,73 @@ td{padding:9px 6px;border-bottom:1px dashed var(--line)}td.n{text-align:right;fo
       try { const nd = await call("purchase", { subhead: sh.value }); cache["purchase|" + key()] = nd; renderPurchase(nd); }
       catch (e) { showErr($("err"), e.message); }
     };
+  }
+
+
+  // ---- Profile tab (view only) ----
+  let profSub = "personal";
+  const PROF_ICON = { personal: "🪪", contact: "📞", parents: "👪", photo: "📷", job: "💼", education: "🎓", event: "🎉" };
+  const HRIS_PROFILE = "http://hris.prangroup.com:8686/Pages/Portal/ProfileUpdate.aspx";
+  const IMG_OK = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/;
+  const dash = v => (v == null || v === "" || v === "0") ? "" : v;
+
+  function profTableCards(tb) {
+    const H = tb.headers || [], R = tb.rows || [];
+    const nice = h => { h = String(h || ""); return h ? h.charAt(0) + h.slice(1).toLowerCase().replace(/(of|no|name|year)$/, " $1") : ""; };
+    return R.map(r => {
+      const rest = r.map((v, i) => i === 0 || !dash(v) ? "" : `<div class="kv"><span>${esc(nice(H[i]) || "-")}</span><span>${esc(v)}</span></div>`).join("");
+      return `<div class="hcard"><div class="htop"><span>${esc(r[0] || "-")}</span></div>${rest || '<div class="sub" style="margin-top:6px">No more details saved on HRIS</div>'}</div>`;
+    }).join("");
+  }
+
+  function profBody(t) {
+    if (t.key === "photo") return '<div id="phbox"><p class="sub">Photos are large, so they load only when you tap the button.</p><button class="link" id="phbtn">📷 Load photos</button></div>';
+    let h = "";
+    if (t.key !== "event") {   // the Event page is only an "add new" form, so only saved events are shown
+      for (const g of t.groups || []) {
+        h += (g.title ? `<h4>${esc(g.title)}</h4>` : "") + g.fields.map(f => `<div class="kv"><span>${esc(f.l)}</span><span${f.v ? "" : ' class="nil"'}>${f.v ? esc(f.v) : "—"}</span></div>`).join("");
+      }
+    }
+    for (const tb of t.tables || []) h += (h ? "<h4>List</h4>" : "") + profTableCards(tb);
+    return h || `<p class="sub">${t.key === "event" ? "No saved events on HRIS." : "No data on HRIS for this section."}</p>`;
+  }
+
+  function showPhotos(box, list) {
+    box.textContent = "";
+    if (!list.length) { const p = document.createElement("p"); p.className = "sub"; p.textContent = "No photos found on HRIS."; box.appendChild(p); return; }
+    const grid = document.createElement("div"); grid.className = "pgrid";
+    list.forEach(x => {
+      const fig = document.createElement("figure");
+      if (IMG_OK.test(x.data || "")) { const im = document.createElement("img"); im.alt = x.label || "Photo"; im.src = x.data; fig.appendChild(im); }
+      else { const na = document.createElement("div"); na.className = "na"; na.textContent = "Not uploaded or too large"; fig.appendChild(na); }
+      const cap = document.createElement("figcaption"); cap.textContent = x.label || ""; fig.appendChild(cap);
+      grid.appendChild(fig);
+    });
+    box.appendChild(grid);
+  }
+
+  function renderProfile(d) {
+    const tabs = d.tabs || [];
+    if (!tabs.length) { $("out").innerHTML = '<div class="card"><p class="sub">No profile data found.</p></div>'; return; }
+    const cur = tabs.find(t => t.key === profSub) || tabs[0];
+    $("out").innerHTML = `<div class="card rise"><div class="me"><div class="av"></div><div><div class="name">${esc(d.name || "Profile")}</div><div class="sub">${esc(d.staffId || "")}</div></div></div></div>
+      <div class="card"><div class="pps" id="pps">${tabs.map(t => `<button class="pp${t === cur ? " on" : ""}" data-k="${esc(t.key)}">${PROF_ICON[t.key] || "📄"} ${esc(t.name)}</button>`).join("")}</div>
+      <div id="pbody">${profBody(cur)}</div>
+      <a class="ext" href="${HRIS_PROFILE}" target="_blank" rel="noopener">Edit profile on HRIS ↗</a></div>`;
+    if (cred && cred.photo && IMG_OK.test(cred.photo)) document.querySelector("#out .av").style.background = "url(" + cred.photo + ") center/cover no-repeat, var(--hero) -94px -75px/244px no-repeat";
+    const onPill = document.querySelector("#pps .pp.on"); if (onPill) $("pps").scrollLeft = Math.max(0, onPill.offsetLeft - 24);
+    document.querySelectorAll("#pps .pp").forEach(b => b.onclick = () => { profSub = b.dataset.k; renderProfile(d); });
+    const btn = $("phbtn");
+    if (btn) {
+      if (d._ph) showPhotos($("phbox"), d._ph);
+      else btn.onclick = async () => {
+        const box = $("phbox");
+        if (!(d.photoSrcs || []).length) return showPhotos(box, []);
+        btn.disabled = true; btn.textContent = "Loading...";
+        try { const p = await call("profilephotos", { srcs: d.photoSrcs }); d._ph = p.photos || []; if (tab === "profile" && $("phbox")) showPhotos($("phbox"), d._ph); }
+        catch (e) { btn.disabled = false; btn.textContent = "📷 Load photos"; showErr($("err"), e.message); }
+      };
+    }
   }
 
   // ---- 3D hero + theme ----
