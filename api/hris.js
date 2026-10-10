@@ -10,6 +10,7 @@ const PAGES = {
   balance: BASE + "/Pages/Portal/QLvApplication.aspx",
   iom: BASE + "/Pages/Portal/QPersonalIOM.aspx",
   order: BASE + "/Pages/ProductPurchase/ProductOrder.aspx",
+  profile: BASE + "/Pages/Portal/ProfileUpdate.aspx",
 };
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -319,9 +320,107 @@ function cleanSess(x) {
   return Object.keys(out).length ? out : null;
 }
 
-const PAGE_LIST = ["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit", "photo"];
+// ---------- Profile (view only: ONE page read, nothing is ever saved or changed) ----------
+const PROFILE_PHOTO_OK = /^\.\.\/\.\.\/Content\/Employee\/(?:Emp|Father|Mother|Signature)\/(?:[A-Za-z0-9_\-]+\/)?[A-Za-z0-9_\-]+\.(?:jpe?g|png|gif|webp)$/i;
+const PROFILE_TAB_KEYS = { personal: "personal", contact: "contact", parents: "parents", photo: "photo", "job description": "job", education: "education", event: "event" };
 
-async function runPage(page, jar, { yr, mo, subhead }) {
+// label + control pairs inside one chunk of HTML -> [{ l, v }]
+function profFields(chunk) {
+  const out = []; let cur = null;
+  const re = /<label([^>]*)>([\s\S]*?)<\/label>|<input([^>]*)>|<select([^>]*)>([\s\S]*?)<\/select>|<textarea([^>]*)>([\s\S]*?)<\/textarea>/gi;
+  let m;
+  while ((m = re.exec(chunk))) {
+    let val = "";
+    if (m[1] !== undefined) {                       // <label>: only the big field labels start a new field
+      if (/class\s*=\s*"[^"]*col-/i.test(m[1])) { cur = { l: text(m[2]).replace(/\*+/g, "").replace(/([a-z])([A-Z])/g, "$1 $2").trim(), v: "" }; out.push(cur); }
+      continue;
+    }
+    if (m[3] !== undefined) {                       // <input>
+      const tag = "<input" + m[3] + ">";
+      const type = (attr(tag, "type") || "text").toLowerCase();
+      if (["hidden", "submit", "button", "file", "image", "reset", "password"].includes(type)) continue;
+      if (type === "radio") {
+        if (!/\schecked/i.test(tag)) continue;
+        const id = attr(tag, "id");
+        const lb = id ? chunk.match(new RegExp('<label[^>]*for="' + id.replace(/[^A-Za-z0-9_\-]/g, "") + '"[^>]*>([\\s\\S]*?)</label>', "i")) : null;
+        val = lb ? text(lb[1]) : attr(tag, "value");
+      } else if (type === "checkbox") {
+        val = /\schecked/i.test(tag) ? "Yes" : "No";
+      } else val = attr(tag, "value");
+    } else if (m[4] !== undefined) {                // <select>: only the option HRIS really has selected
+      const opts = [...m[5].matchAll(/<option([^>]*)>([\s\S]*?)<\/option>/gi)];
+      const sel = opts.find(o => /\sselected/i.test(o[1]));
+      val = sel ? text(sel[2]) : "";
+    } else if (m[6] !== undefined) val = text(m[7]); // <textarea>
+    val = String(val || "").trim();
+    if (cur && val) cur.v = cur.v ? cur.v + " \u00b7 " + val : val;
+  }
+  return out;
+}
+
+// split a pane by its box titles (Official Contact, Present Address, Father ...)
+function profGroups(pane) {
+  const parts = pane.split(/<h3[^>]*class="box-title"[^>]*>/i);
+  if (parts.length === 1) { const f = profFields(pane); return f.length ? [{ title: "", fields: f }] : []; }
+  const groups = [];
+  const head = profFields(parts[0]); if (head.length) groups.push({ title: "", fields: head });
+  for (let i = 1; i < parts.length; i++) {
+    const m = parts[i].match(/^([\s\S]*?)<\/h3>/);
+    const f = profFields(m ? parts[i].slice(m[0].length) : parts[i]);
+    if (f.length) groups.push({ title: m ? text(m[1]) : "", fields: f });
+  }
+  return groups;
+}
+
+// real data tables (education list, saved events ...). Radio-button tables have no "table" class, so they are skipped.
+function profTables(pane) {
+  const out = [];
+  for (const t of pane.match(/<table[^>]*class="[^"]*\btable\b[^"]*"[^>]*>[\s\S]*?<\/table>/gi) || []) {
+    let headers = []; const rows = [];
+    for (const tr of t.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
+      const th = [...tr.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)].map(x => text(x[1]));
+      if (th.length) { headers = th; continue; }
+      const c = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(x => text(x[1]));
+      if (c.length && c.some(Boolean)) rows.push(c);
+    }
+    if (headers.length || rows.length) out.push({ headers, rows: rows.slice(0, 60) });
+  }
+  return out;
+}
+
+function parseProfile(html) {
+  const i0 = html.indexOf("bhoechie-tab-container");
+  if (i0 < 0) return null;
+  const body = html.slice(i0);
+  const names = [...body.matchAll(/<a[^>]*class="list-group-item[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)].map(m => text(m[1]));
+  const starts = []; const re = /<div class="bhoechie-tab-content/g; let m;
+  while ((m = re.exec(body))) starts.push(m.index);
+  if (!starts.length) return null;
+  const endAt = body.search(/<footer|<\/section>/i);
+  const end = endAt > 0 ? endAt : body.length;
+  const tabs = []; const photoSrcs = [];
+  starts.forEach((s, i) => {
+    const pane = body.slice(s, i + 1 < starts.length ? starts[i + 1] : end);
+    const name = names[i] || ("Section " + (i + 1));
+    const key = PROFILE_TAB_KEYS[name.toLowerCase()] || ("s" + i);
+    if (key === "photo") {
+      const labels = { Employee: "Employee", Father: "Father", Mother: "Mother", Nominee: "Signature" };
+      for (const im of pane.matchAll(/<img[^>]*?\sid="img(\w+)"[^>]*?\ssrc="([^"]*)"/gi)) {
+        const src = dec(im[2]).trim();
+        if (PROFILE_PHOTO_OK.test(src)) photoSrcs.push({ label: labels[im[1]] || im[1], src });
+      }
+      tabs.push({ key, name, groups: [], tables: [] });
+      return;
+    }
+    tabs.push({ key, name, groups: profGroups(pane), tables: profTables(pane) });
+  });
+  const pick = id => { const x = html.match(new RegExp('id="' + id + '"[^>]*>([^<]*)<', "i")); return x ? text(x[1]) : ""; };
+  return { staffId: pick("cphMain_tbxStaffID"), name: pick("cphMain_tbxName"), tabs, photoSrcs: photoSrcs.slice(0, 4) };
+}
+
+const PAGE_LIST = ["attendance", "payslip", "purchase", "balance", "trend", "iom", "limit", "photo", "profile", "profilephotos"];
+
+async function runPage(page, jar, { yr, mo, subhead, srcs }) {
   if (page === "attendance") {
     const { html } = await showMonth(PAGES.attendance, jar, yr, mo);
     const d = parseAttendance(html);
@@ -402,6 +501,22 @@ async function runPage(page, jar, { yr, mo, subhead }) {
     return d;
   }
 
+  if (page === "profile") {   // read-only: one GET of the profile page
+    const r = await get(PAGES.profile, jar);
+    if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
+    const d = parseProfile(await r.text());
+    if (!d) throw new UserError("Could not read the profile page (HRIS page format may have changed)", 502);
+    return d;
+  }
+
+  if (page === "profilephotos") {   // loaded only when the person taps "Load photos"; the path list is checked strictly
+    const list = (Array.isArray(srcs) ? srcs : []).slice(0, 4)
+      .filter(x => x && typeof x.src === "string" && PROFILE_PHOTO_OK.test(x.src))
+      .map(x => ({ label: String(x.label || "").replace(/[^A-Za-z ]/g, "").slice(0, 20), src: x.src }));
+    const got = await Promise.all(list.map(async x => ({ label: x.label, data: (await fetchPhoto(x.src, jar)).data })));
+    return { photos: got };
+  }
+
   if (page === "iom") {
     const r = await get(PAGES.iom, jar);
     if (r.status >= 300 && r.status < 400) throw new UserError("Login did not complete (redirected)", 401);
@@ -414,12 +529,12 @@ async function runPage(page, jar, { yr, mo, subhead }) {
 // ---------- handler ----------
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
-  const { id, pass, page, month, year, subhead, sess } = req.body || {};
+  const { id, pass, page, month, year, subhead, sess, srcs } = req.body || {};
   if (!id || !pass) return res.status(400).json({ error: "Enter your ID and password" });
   if (!PAGE_LIST.includes(page)) return res.status(400).json({ error: "Unknown page" });
 
   try {
-    const p = { yr: year || new Date().getFullYear(), mo: month || (new Date().getMonth() + 1), subhead };
+    const p = { yr: year || new Date().getFullYear(), mo: month || (new Date().getMonth() + 1), subhead, srcs };
     let jar = cleanSess(sess), data = null;
     if (jar) {   // saved session: no login needed; if it expired, fall back to a normal login
       try { data = await runPage(page, jar, p); }
