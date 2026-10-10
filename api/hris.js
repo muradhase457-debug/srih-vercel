@@ -70,13 +70,28 @@ function updateJar(res, jar) {
 }
 const cookieHeader = jar => Object.entries(jar).map(([k, v]) => k + "=" + v).join("; ");
 
+// HRIS sometimes needs a second try when the connection can't be opened (connect timeout / refused / DNS hiccup).
+// Only "could not connect" errors are retried, so nothing is ever sent twice.
+async function fx(url, opts) {
+  let last;
+  for (let i = 0; i < 3; i++) {
+    try { return await fetch(url, opts); }
+    catch (e) {
+      last = e;
+      const c = e && e.cause && e.cause.code;
+      if (!["UND_ERR_CONNECT_TIMEOUT", "ECONNREFUSED", "EAI_AGAIN", "ETIMEDOUT"].includes(c)) throw e;
+      await new Promise(r => setTimeout(r, 700));
+    }
+  }
+  throw last;
+}
 async function get(url, jar) {
-  const r = await fetch(url, { headers: { ...UA, Cookie: cookieHeader(jar) }, redirect: "manual" });
+  const r = await fx(url, { headers: { ...UA, Cookie: cookieHeader(jar) }, redirect: "manual" });
   updateJar(r, jar);
   return r;
 }
 async function post(url, jar, fields) {
-  const r = await fetch(url, {
+  const r = await fx(url, {
     method: "POST", redirect: "manual",
     headers: { ...UA, "Content-Type": "application/x-www-form-urlencoded", Cookie: cookieHeader(jar), Referer: url },
     body: new URLSearchParams(fields),
@@ -365,7 +380,11 @@ module.exports = async (req, res) => {
     }
   } catch (e) {
     const code = e instanceof UserError ? e.code : 502;
-    const msg = e instanceof UserError ? e.message : "HRIS reach kora jachche na: " + (e.cause && e.cause.code ? e.cause.code : e.message);
+    const ec = e && e.cause && e.cause.code;
+    const msg = e instanceof UserError ? e.message
+      : (ec === "UND_ERR_CONNECT_TIMEOUT" || ec === "ETIMEDOUT" || ec === "ECONNREFUSED")
+        ? "HRIS server ekhon reach kora jachche na (timeout). Kichukkhon por abar try korun. [" + ec + "]"
+        : "HRIS reach kora jachche na: " + (ec ? ec : e.message);
     return res.status(code).json({ error: msg });
   }
 };
