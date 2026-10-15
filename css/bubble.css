@@ -1,0 +1,14 @@
+/* ===== Bubble click animation (new feature) ===== */
+.tabwrap{position:relative}
+.drop{--bub:var(--bc,#fbeaa8);position:absolute;top:0;left:0;width:46px;height:46px;margin:-8px 0 0 -23px;border-radius:50%;background:var(--bub);
+  display:flex;align-items:center;justify-content:center;font-size:23px;line-height:1;pointer-events:none;opacity:0;z-index:20;
+  box-shadow:0 8px 16px var(--sh)}
+.drop::after{content:"";position:absolute;left:50%;top:70%;width:20px;height:0;margin-left:-10px;background:var(--bub);border-radius:0 0 10px 10px;z-index:-1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .drop{--bub:color-mix(in srgb,var(--bc,#fbeaa8) 42%,#0a2229)}}
+:root[data-theme="dark"] .drop{--bub:color-mix(in srgb,var(--bc,#fbeaa8) 42%,#0a2229)}
+.drop.go{animation:dropUp .85s cubic-bezier(.3,1.2,.4,1)}
+.drop.go::after{animation:neck .85s cubic-bezier(.3,1.2,.4,1)}
+@keyframes dropUp{0%{opacity:0;transform:translateY(30px) scale(.3)}35%{opacity:1;transform:translateY(-40px) scale(1)}65%{opacity:1;transform:translateY(-36px) scale(1)}100%{opacity:0;transform:translateY(10px) scale(.5)}}
+@keyframes neck{0%{height:0}35%{height:46px}65%{height:40px}100%{height:0}}
+.tab.on{animation:tabpop .5s cubic-bezier(.3,1.6,.5,1)}
+@keyframes tabpop{0%{transform:scale(.92)}100%{transform:scale(1)}}
